@@ -1,0 +1,2545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>J.A.R.V.I.S. Memory Interface</title>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#000;font-family:Arial,sans-serif}
+#webcam,#handCanvas{position:fixed;bottom:20px;right:20px;width:min(560px,46vw);height:auto;aspect-ratio:16/9;transform:scaleX(-1)}
+#webcam{object-fit:cover;z-index:10;border-radius:10px}
+#handCanvas{z-index:11;pointer-events:none}
+#cameraToggle{position:fixed;top:14px;left:14px;z-index:20;padding:5px 9px;font-size:10px;border-radius:5px;background:rgba(0,10,20,.65);color:#36dfff;border:1px solid rgba(54,223,255,.45);cursor:pointer;backdrop-filter:blur(4px)}
+#cameraToggle:hover{background:rgba(0,120,180,.25);border-color:#00d9ff;box-shadow:0 0 12px rgba(0,217,255,.35)}
+#hint{position:fixed;left:14px;bottom:14px;z-index:20;font-size:10px;letter-spacing:2px;color:rgba(110,238,255,.55);line-height:1.8}
+#reticle{position:fixed;left:50%;top:50%;border:1px dashed rgba(54,223,255,.28);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:5;transition:border-color .25s,box-shadow .25s,opacity .3s}
+#reticle.lock{border-style:solid;border-color:rgba(160,250,255,.85);box-shadow:0 0 22px rgba(0,217,255,.45),inset 0 0 22px rgba(0,217,255,.18)}
+#panel{position:fixed;left:50%;top:50%;width:max-content;min-width:min(260px,80vw);max-width:94vw;padding:14px;z-index:30;background:rgba(0,12,24,.9);border:1px solid rgba(54,223,255,.5);box-shadow:0 0 40px rgba(0,180,255,.35),inset 0 0 30px rgba(0,120,180,.15);color:#dffcff;backdrop-filter:blur(6px);opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.15,.01);transition:transform .5s cubic-bezier(.2,.9,.2,1),opacity .25s}
+#panel.open{opacity:1;transform:translate(-50%,-50%) scale(1,1);pointer-events:auto}
+#panel::before,#panel::after{content:"";position:absolute;width:26px;height:26px;border:3px solid #6feeff;filter:drop-shadow(0 0 6px #00d9ff)}
+#panel::before{top:-6px;left:-6px;border-right:0;border-bottom:0}
+#panel::after{bottom:-6px;right:-6px;border-left:0;border-top:0}
+.ph,.pf{display:flex;justify-content:space-between;gap:12px;font-size:11px;letter-spacing:3px;color:#6feeff}
+.ph{margin-bottom:10px;font-weight:bold;color:#dffcff}
+.ph span:last-child{font-weight:normal;color:rgba(110,238,255,.6);font-size:10px}
+.pf{margin-top:10px;font-size:10px;color:rgba(110,238,255,.65)}
+.photo{position:relative;overflow:hidden;line-height:0;border:1px solid rgba(54,223,255,.3);background:#000}
+.photo img,.photo video{display:block;max-width:none;opacity:1;transform:scale(1);filter:blur(0);transition:opacity .8s cubic-bezier(.4,0,.2,1),transform 1s cubic-bezier(.2,.8,.2,1),filter .8s cubic-bezier(.4,0,.2,1);will-change:opacity,transform,filter}
+.photo.media-out img,.photo.media-out video{opacity:0;transform:scale(1.025);filter:blur(7px)}
+.photo.media-in img,.photo.media-in video{animation:hologramFadeIn .9s cubic-bezier(.2,.8,.2,1) forwards}
+@keyframes hologramFadeIn{
+0%{opacity:0;transform:scale(1.025);filter:blur(8px)}
+30%{opacity:.18;filter:blur(6px)}
+55%{opacity:.52;transform:scale(1.012);filter:blur(3px)}
+78%{opacity:.82;transform:scale(1.004);filter:blur(1px)}
+100%{opacity:1;transform:scale(1);filter:blur(0)}
+}
+#panel.missing .photo{width:min(420px,76vw);aspect-ratio:4/3;background:rgba(5,35,50,.9)}
+.photo .miss{display:none;position:absolute;inset:0;align-items:center;justify-content:center;text-align:center;font-size:12px;letter-spacing:2px;line-height:1.9;color:rgba(130,235,255,.75)}
+#panel.missing .photo img,#panel.missing .photo video{display:none}
+#panel.missing .photo .miss{display:flex}
+#panel.vid .photo img{display:none}
+#panel:not(.vid) .photo video{display:none}
+#pDots{letter-spacing:5px;font-size:9px}
+#boot{position:fixed;inset:0;background:#000;z-index:100;display:flex;justify-content:center;align-items:center;transition:opacity 1s}
+#boot.hidden{opacity:0;pointer-events:none}
+.bc{width:420px;text-align:center;color:#dffcff}
+.bt{font-size:42px;letter-spacing:8px;margin-bottom:8px;text-shadow:0 0 10px #00d9ff,0 0 30px #008cff}
+.bs{font-size:13px;letter-spacing:5px;opacity:.7;margin-bottom:35px}
+.bar{width:100%;height:2px;background:rgba(0,180,255,.15);overflow:hidden}
+#fill{width:0;height:100%;background:#00d9ff;box-shadow:0 0 10px #00d9ff,0 0 25px #008cff;transition:width .25s}
+#status{margin-top:14px;font-size:10px;letter-spacing:3px;color:#6feeff;opacity:.75}
+</style>
+
+<script type="importmap">
+{
+"imports":{
+"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+}
+}
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+
+<body>
+
+<div id="boot">
+<div class="bc">
+<div class="bt">J.A.R.V.I.S.</div>
+<div class="bs">MEMORY INTERFACE</div>
+<div class="bar"><div id="fill"></div></div>
+<div id="status">INITIALIZING SYSTEM</div>
+</div>
+</div>
+
+<video id="webcam" autoplay playsinline></video>
+<canvas id="handCanvas"></canvas>
+
+<button id="cameraToggle">HIDE CAMERA</button>
+
+<div id="hint">
+LEFT HAND SPINS THE CORE · RIGHT HAND SPINS THE MEMORIES (TWIST = ROLL)<br>
+BRING A MEMORY TO THE RING · PINCH RIGHT HAND TO OPEN / CLOSE · SWIPE LEFT / RIGHT TO BROWSE
+</div>
+
+<div id="reticle"></div>
+
+<div id="panel">
+<div class="ph">
+<span id="pTitle"></span>
+<span>PERSONAL ARCHIVE</span>
+</div>
+
+<div class="photo" id="media">
+<img id="pImg" alt="">
+<video id="pVid" playsinline muted></video>
+
+<div class="miss">
+<div>
+NO MEDIA FOUND<br>
+<b id="pFile"></b>
+</div>
+</div>
+</div>
+
+<div class="pf">
+<span id="pCap"></span>
+<span id="pCount"></span>
+</div>
+
+<div class="pf">
+<span id="pDots"></span>
+<span>SWIPE ◄ ► · PINCH TO CLOSE</span>
+</div>
+</div>
+
+<script type="module">
+
+import * as THREE from "three";
+
+import {
+EffectComposer
+} from "three/addons/postprocessing/EffectComposer.js";
+
+import {
+RenderPass
+} from "three/addons/postprocessing/RenderPass.js";
+
+import {
+UnrealBloomPass
+} from "three/addons/postprocessing/UnrealBloomPass.js";
+
+
+// ============================================================
+// MEMORIES
+// ============================================================
+
+const MEMORIES=[
+
+{
+title:"MEMORY 01",
+caption:"JMUNC",
+folder:"memory1",
+items:[
+{src:"memory1/photo1.jpg"},
+{src:"memory1/photo2.jpg"},
+{src:"memory1/video1.mp4"}
+]
+},
+
+{
+title:"MEMORY 02",
+caption:"MEMORY",
+folder:"memory2",
+items:[]
+},
+
+{
+title:"MEMORY 03",
+caption:"MEMORY",
+folder:"memory3",
+items:[]
+},
+
+{
+title:"MEMORY 04",
+caption:"MEMORY",
+folder:"memory4",
+items:[]
+},
+
+{
+title:"MEMORY 05",
+caption:"MEMORY",
+folder:"memory5",
+items:[]
+},
+
+{
+title:"MEMORY 06",
+caption:"MEMORY",
+folder:"memory6",
+items:[]
+}
+
+];
+
+
+// ============================================================
+// SETTINGS
+// ============================================================
+
+const SWAP_MEDIAPIPE_HAND_LABELS=true;
+
+const ORBIT_RADIUS=2.0;
+const SPIN_GAIN=6.0;
+const TWIST_GAIN=1.0;
+const CAM_W=640;
+const CAM_H=480;
+const RING_FRACTION=.16;
+const SLIDESHOW_DELAY=3000;
+
+const $=id=>document.getElementById(id);
+
+
+// ============================================================
+// AUDIO
+// ============================================================
+
+let audioCtx=null;
+let masterGain=null;
+let ambientGain=null;
+let ambientFilter=null;
+let ambientStarted=false;
+let audioReady=false;
+let particleAudioTimer=0;
+let lastExplosionAudio=0;
+
+function initAudio(){
+
+if(audioReady)return;
+
+try{
+
+audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+
+masterGain=audioCtx.createGain();
+masterGain.gain.value=.22;
+masterGain.connect(audioCtx.destination);
+
+audioReady=true;
+
+if(audioCtx.state==="suspended")
+audioCtx.resume().catch(()=>{});
+
+startAmbient();
+
+}catch(e){
+console.warn("Audio unavailable:",e);
+}
+
+}
+
+["pointerdown","keydown","touchstart"].forEach(e=>{
+window.addEventListener(e,initAudio,{once:true,passive:true});
+});
+
+
+function tone(frequency,duration,type="sine",volume=.025,endFrequency=null){
+
+if(!audioCtx||!masterGain)return;
+
+if(audioCtx.state==="suspended")
+audioCtx.resume().catch(()=>{});
+
+const now=audioCtx.currentTime;
+
+const osc=audioCtx.createOscillator();
+const gain=audioCtx.createGain();
+
+osc.type=type;
+
+osc.frequency.setValueAtTime(frequency,now);
+
+if(endFrequency)
+osc.frequency.exponentialRampToValueAtTime(Math.max(20,endFrequency),now+duration);
+
+gain.gain.setValueAtTime(.0001,now);
+gain.gain.exponentialRampToValueAtTime(Math.max(.0001,volume),now+.015);
+gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
+
+osc.connect(gain);
+gain.connect(masterGain);
+
+osc.start(now);
+osc.stop(now+duration+.03);
+
+}
+
+
+function startAmbient(){
+
+if(!audioReady||ambientStarted)return;
+
+ambientStarted=true;
+
+const now=audioCtx.currentTime;
+
+ambientFilter=audioCtx.createBiquadFilter();
+ambientFilter.type="lowpass";
+ambientFilter.frequency.value=260;
+ambientFilter.Q.value=.45;
+
+ambientGain=audioCtx.createGain();
+ambientGain.gain.setValueAtTime(.0001,now);
+ambientGain.gain.exponentialRampToValueAtTime(.018,now+1.8);
+
+const hum=audioCtx.createOscillator();
+hum.type="sine";
+hum.frequency.value=58;
+
+const hum2=audioCtx.createOscillator();
+hum2.type="sine";
+hum2.frequency.value=116;
+
+const hum2Gain=audioCtx.createGain();
+hum2Gain.gain.value=.18;
+
+const lfo=audioCtx.createOscillator();
+const lfoGain=audioCtx.createGain();
+
+lfo.type="sine";
+lfo.frequency.value=.18;
+lfoGain.gain.value=75;
+
+lfo.connect(lfoGain);
+lfoGain.connect(ambientFilter.frequency);
+
+hum.connect(ambientFilter);
+hum2.connect(hum2Gain);
+hum2Gain.connect(ambientFilter);
+
+ambientFilter.connect(ambientGain);
+ambientGain.connect(masterGain);
+
+hum.start(now);
+hum2.start(now);
+lfo.start(now);
+
+}
+
+
+function particleEnergySound(intensity){
+
+if(!audioReady||!audioCtx)return;
+
+const now=performance.now();
+
+if(now-particleAudioTimer<180)return;
+
+particleAudioTimer=now;
+
+intensity=THREE.MathUtils.clamp(intensity,0,1);
+
+if(intensity<.08)return;
+
+const frequency=THREE.MathUtils.lerp(180,520,intensity);
+const volume=THREE.MathUtils.lerp(.002,.008,intensity);
+
+tone(frequency,.16,"sine",volume,frequency*1.8);
+
+}
+
+
+function explosionSound(intensity){
+
+if(!audioReady||!audioCtx)return;
+
+const now=performance.now();
+
+if(now-lastExplosionAudio<90)return;
+
+lastExplosionAudio=now;
+
+intensity=THREE.MathUtils.clamp(intensity,0,1);
+
+tone(75+intensity*25,.38,"sine",.018+intensity*.025,34);
+
+setTimeout(()=>{
+tone(180+intensity*120,.22,"triangle",.012+intensity*.018,850+intensity*500);
+},20);
+
+setTimeout(()=>{
+tone(1100+intensity*500,.13,"sine",.006+intensity*.012,1750+intensity*500);
+},55);
+
+}
+
+
+function selectionSound(){
+
+tone(520,.07,"sine",.016,820);
+
+setTimeout(()=>{
+tone(920,.09,"sine",.014,1250);
+},55);
+
+}
+
+function openSound(){
+
+tone(280,.20,"sine",.025,760);
+
+setTimeout(()=>{
+tone(760,.16,"sine",.018,1200);
+},75);
+
+}
+
+function closeSound(){
+tone(780,.16,"sine",.018,360);
+}
+
+function mediaChangeSound(direction=1){
+
+tone(
+direction>0?420:680,
+.16,
+"sine",
+.012,
+direction>0?920:380
+);
+
+}
+
+function swipeSound(direction){
+
+tone(
+direction>0?360:850,
+.12,
+"triangle",
+.012,
+direction>0?950:300
+);
+
+}
+
+function pinchSound(){
+tone(1100,.045,"sine",.012,1450);
+}
+
+function bootSound(){
+
+tone(220,.28,"sine",.012,440);
+
+setTimeout(()=>{
+tone(440,.25,"sine",.015,880);
+},180);
+
+setTimeout(()=>{
+tone(880,.30,"sine",.018,1320);
+},380);
+
+}
+
+
+// ============================================================
+// BOOT
+// ============================================================
+
+[
+[10,"INITIALIZING SYSTEM",0],
+[30,"LOADING HOLOGRAPHIC CORE",300],
+[55,"INDEXING MEMORY ARCHIVE",650],
+[75,"CONNECTING HAND INTERFACE",950],
+[100,"SYSTEM ONLINE",1450]
+].forEach(([p,t,d])=>{
+
+setTimeout(()=>{
+
+$("fill").style.width=p+"%";
+$("status").textContent=t;
+
+if(p===100)bootSound();
+
+},d);
+
+});
+
+setTimeout(()=>{
+$("boot").classList.add("hidden");
+},1800);
+
+
+// ============================================================
+// THREE
+// ============================================================
+
+const scene=new THREE.Scene();
+
+const camera=new THREE.PerspectiveCamera(
+60,
+innerWidth/innerHeight,
+.1,
+100
+);
+
+camera.position.z=5;
+
+const renderer=new THREE.WebGLRenderer({
+antialias:true,
+powerPreference:"high-performance"
+});
+
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+
+document.body.appendChild(renderer.domElement);
+
+const composer=new EffectComposer(renderer);
+
+composer.addPass(new RenderPass(scene,camera));
+
+composer.addPass(
+new UnrealBloomPass(
+new THREE.Vector2(innerWidth,innerHeight),
+1.5,
+.4,
+.1
+)
+);
+
+const hologram=new THREE.Group();
+hologram.scale.setScalar(1.28);
+scene.add(hologram);
+
+const core=new THREE.Group();
+hologram.add(core);
+
+
+// ============================================================
+// CORE
+// ============================================================
+
+const lineMat=(c,o)=>new THREE.LineBasicMaterial({
+color:c,
+transparent:true,
+opacity:o
+});
+
+const addLine=(pts,c,o)=>{
+
+const l=new THREE.Line(
+new THREE.BufferGeometry().setFromPoints(pts),
+lineMat(c,o)
+);
+
+core.add(l);
+return l;
+
+};
+
+
+const coreMesh=new THREE.Mesh(
+new THREE.IcosahedronGeometry(.30,2),
+new THREE.MeshBasicMaterial({
+color:"#0278f5",
+wireframe:true,
+transparent:true,
+opacity:.6
+})
+);
+
+const innerCore=new THREE.Mesh(
+new THREE.IcosahedronGeometry(.15,1),
+new THREE.MeshBasicMaterial({
+color:"#0288f5",
+wireframe:true,
+transparent:true,
+opacity:.9
+})
+);
+
+core.add(coreMesh,innerCore);
+
+
+// ============================================================
+// ARCS
+// ============================================================
+
+function arc(rx,ry,a0,a1,rX,rY,rZ,o){
+
+const l=addLine(
+
+new THREE.EllipseCurve(
+0,0,rx,ry,a0,a1,false,0
+)
+.getPoints(70)
+.map(p=>new THREE.Vector3(p.x,p.y,0)),
+
+0x36dfff,
+o
+
+);
+
+l.rotation.set(rX,rY,rZ);
+
+return l;
+
+}
+
+const mainArc1=arc(.78,.38,.15,2.45,.65,.10,.30,.75);
+const mainArc2=arc(.78,.38,3.0,5.15,.65,.10,.30,.55);
+const sideArc1=arc(.62,.25,0,1.55,1.15,-.45,-.30,.60);
+const sideArc2=arc(.62,.25,2.1,4.25,1.15,-.45,-.30,.40);
+const vArc1=arc(.50,.20,.30,2.0,Math.PI/2,.35,.15,.50);
+const vArc2=arc(.50,.20,3.2,5.4,Math.PI/2,.35,.15,.35);
+const thinArc=arc(.92,.12,.4,4.8,.25,1.15,.1,.28);
+
+
+// ============================================================
+// RADIAL DATA
+// ============================================================
+
+for(let i=0;i<24;i++){
+
+const a=Math.random()*Math.PI*2;
+const r0=.20+Math.random()*.12;
+const r1=.48+Math.random()*.45;
+const z=(Math.random()-.5)*.35;
+
+addLine([
+new THREE.Vector3(Math.cos(a)*r0,Math.sin(a)*r0,z),
+new THREE.Vector3(Math.cos(a)*r1,Math.sin(a)*r1,z)
+],0x36dfff,.15+Math.random()*.4);
+
+}
+
+for(let i=0;i<34;i++){
+
+const a=i/34*Math.PI*2;
+const r=.55+Math.random()*.27;
+const l=.025+Math.random()*.10;
+
+addLine([
+new THREE.Vector3(Math.cos(a)*r,Math.sin(a)*r,0),
+new THREE.Vector3(Math.cos(a)*(r+l),Math.sin(a)*(r+l),0)
+],0x8ff7ff,.18+Math.random()*.35);
+
+}
+
+const nodeGeo=new THREE.SphereGeometry(.014,6,6);
+
+const nodeMat=new THREE.MeshBasicMaterial({
+color:0x8ff7ff
+});
+
+for(let i=0;i<18;i++){
+
+const n=new THREE.Mesh(nodeGeo,nodeMat);
+
+const a=Math.random()*Math.PI*2;
+const r=.4+Math.random()*.38;
+
+n.position.set(
+Math.cos(a)*r,
+Math.sin(a)*r,
+(Math.random()-.5)*.45
+);
+
+core.add(n);
+
+}
+
+
+// ============================================================
+// CLOCK
+// ============================================================
+
+const clockCv=document.createElement("canvas");
+clockCv.width=1024;
+clockCv.height=256;
+
+const clockCtx=clockCv.getContext("2d");
+
+const clockTex=new THREE.CanvasTexture(clockCv);
+clockTex.colorSpace=THREE.SRGBColorSpace;
+
+const clockSprite=new THREE.Sprite(
+new THREE.SpriteMaterial({
+map:clockTex,
+transparent:true,
+opacity:.95,
+depthWrite:false
+})
+);
+
+clockSprite.scale.set(1.15,.29,1);
+clockSprite.position.z=.15;
+
+core.add(clockSprite);
+
+let lastSec=-1;
+
+function updateClock(){
+
+const n=new Date();
+
+if(n.getSeconds()===lastSec)return;
+
+lastSec=n.getSeconds();
+
+let h=n.getHours();
+const p=h>=12?"PM":"AM";
+
+h=h%12||12;
+
+const t=
+String(h).padStart(2,"0")+
+":"+
+String(n.getMinutes()).padStart(2,"0")+
+":"+
+String(n.getSeconds()).padStart(2,"0");
+
+const c=clockCtx;
+
+c.clearRect(0,0,1024,256);
+
+c.textAlign="center";
+c.textBaseline="middle";
+
+c.font="bold 125px Arial";
+c.fillStyle="rgba(210,250,255,.95)";
+c.shadowColor="#00d9ff";
+c.shadowBlur=25;
+
+c.fillText(t,512,105);
+
+c.shadowBlur=0;
+
+c.font="28px Arial";
+c.fillStyle="rgba(80,220,255,.8)";
+
+c.fillText("LOCAL TIME  •  "+p,512,190);
+
+clockTex.needsUpdate=true;
+
+}
+
+
+// ============================================================
+// MEMORY CARDS
+// ============================================================
+
+const cardGroup=new THREE.Group();
+scene.add(cardGroup);
+
+const cards=[];
+
+MEMORIES.forEach((m,i)=>{
+
+const cv=document.createElement("canvas");
+cv.width=512;
+cv.height=256;
+
+const tex=new THREE.CanvasTexture(cv);
+tex.colorSpace=THREE.SRGBColorSpace;
+
+const mat=new THREE.SpriteMaterial({
+map:tex,
+transparent:true,
+opacity:.8,
+depthWrite:false
+});
+
+const sprite=new THREE.Sprite(mat);
+
+const N=MEMORIES.length;
+
+const y=1-(i+.5)/N*2;
+const r=Math.sqrt(1-y*y);
+const th=i*2.399963;
+
+const base=new THREE.Vector3(
+Math.cos(th)*r,
+y,
+Math.sin(th)*r
+).multiplyScalar(ORBIT_RADIUS);
+
+sprite.position.copy(base);
+
+cardGroup.add(sprite);
+
+cards.push({
+m,cv,
+ctx:cv.getContext("2d"),
+tex,mat,sprite,base,
+phase:Math.random()*6.28,
+s:1,
+active:false
+});
+
+drawCard(cards[i]);
+
+});
+
+
+function drawCard(c){
+
+const x=c.ctx;
+const w=512;
+const h=256;
+const a=c.active;
+
+x.clearRect(0,0,w,h);
+
+x.fillStyle=a?"rgba(0,50,75,.62)":"rgba(0,15,28,.4)";
+x.fillRect(14,14,w-28,h-28);
+
+x.strokeStyle=a?"rgba(170,252,255,.95)":"rgba(54,223,255,.55)";
+x.lineWidth=4;
+
+x.beginPath();
+
+[
+[25,25,1,1],
+[w-25,25,-1,1],
+[25,h-25,1,-1],
+[w-25,h-25,-1,-1]
+].forEach(([cx,cy,sx,sy])=>{
+
+x.moveTo(cx+sx*90,cy);
+x.lineTo(cx,cy);
+x.lineTo(cx,cy+sy*50);
+
+});
+
+x.stroke();
+
+x.shadowColor="#00d9ff";
+x.shadowBlur=12;
+
+x.textAlign="left";
+x.textBaseline="middle";
+
+x.font="bold 30px Arial";
+x.fillStyle="rgba(70,220,255,.85)";
+x.fillText(c.m.title,55,80);
+
+x.font="bold 42px Arial";
+x.fillStyle="rgba(215,252,255,.97)";
+x.fillText(c.m.caption,55,140);
+
+x.shadowBlur=0;
+
+x.font="20px Arial";
+x.fillStyle=a?"rgba(190,252,255,.95)":"rgba(80,210,245,.55)";
+
+const count=c.m.items.length;
+
+let bottomText="EMPTY FOLDER";
+
+if(count===1)bottomText="1 ITEM";
+if(count>1)bottomText=count+" ITEMS";
+if(a)bottomText="PINCH TO OPEN";
+
+x.fillText(bottomText,55,200);
+
+c.tex.needsUpdate=true;
+
+}
+
+
+// ============================================================
+// SPINNERS
+// ============================================================
+
+const MAX_W=14;
+const MOMENTUM_GAIN=1.35;
+const MOMENTUM_MAX=18;
+const MOMENTUM_DECAY=1.7;
+
+const wrapA=a=>Math.atan2(Math.sin(a),Math.cos(a));
+
+const _q=new THREE.Quaternion();
+const _r=new THREE.Vector3();
+const _v=new THREE.Vector3();
+
+function makeSpinner(group,friction,idleW){
+
+return{
+group,
+friction,
+idleW:idleW||new THREE.Vector3(),
+w:new THREE.Vector3(),
+F:null,
+S:null,
+active:false,
+braking:false,
+lastInputTime:0,
+momentumLocked:false
+};
+
+}
+
+
+function feed(sp,lm){
+
+const now=performance.now();
+
+if(!lm){
+sp.active=false;
+return;
+}
+
+const p=lm[9];
+
+const a=Math.atan2(
+lm[9].y-lm[0].y,
+lm[9].x-lm[0].x
+);
+
+if(!sp.F){
+
+sp.F={x:p.x,y:p.y,a};
+
+}else{
+
+const sd=Math.hypot(
+p.x-sp.F.x,
+p.y-sp.F.y
+);
+
+const k=THREE.MathUtils.clamp(
+.22+sd*14,
+.22,
+.9
+);
+
+const oldX=sp.F.x;
+const oldY=sp.F.y;
+const oldA=sp.F.a;
+
+sp.F.x+=(p.x-sp.F.x)*k;
+sp.F.y+=(p.y-sp.F.y)*k;
+sp.F.a+=wrapA(a-sp.F.a)*k;
+
+if(sp.S){
+
+const dx=sp.F.x-oldX;
+const dy=sp.F.y-oldY;
+const da=wrapA(sp.F.a-oldA);
+
+const instant=new THREE.Vector3(
+dy*SPIN_GAIN,
+-dx*SPIN_GAIN,
+da*TWIST_GAIN
+);
+
+const velocity=instant.clone().divideScalar(
+Math.max(.008,1/60)
+);
+
+const speed=velocity.length();
+
+if(speed>.01){
+
+sp.w.lerp(velocity,.35);
+
+if(sp.w.length()>MOMENTUM_MAX)
+sp.w.setLength(MOMENTUM_MAX);
+
+}
+
+}
+
+}
+
+sp.active=true;
+sp.lastInputTime=now;
+sp.momentumLocked=false;
+
+}
+
+
+function applySpin(g,v){
+
+const ang=v.length();
+
+if(ang<1e-6)return;
+
+_q.setFromAxisAngle(
+_v.copy(v).divideScalar(ang),
+ang
+);
+
+g.quaternion.premultiply(_q).normalize();
+
+}
+
+
+function updateSpinner(sp,dt){
+
+if(sp.active&&sp.F){
+
+if(!sp.S){
+
+sp.S={
+x:sp.F.x,
+y:sp.F.y,
+a:sp.F.a
+};
+
+}
+
+const S=sp.S;
+const F=sp.F;
+
+const k=1-Math.exp(-dt*12);
+
+const nx=S.x+(F.x-S.x)*k;
+const ny=S.y+(F.y-S.y)*k;
+const na=S.a+(F.a-S.a)*k;
+
+_r.set(
+(ny-S.y)*SPIN_GAIN,
+-(nx-S.x)*SPIN_GAIN,
+(na-S.a)*TWIST_GAIN
+);
+
+S.x=nx;
+S.y=ny;
+S.a=na;
+
+applySpin(sp.group,_r);
+
+const measuredVelocity=_r.clone().divideScalar(
+Math.max(dt,.001)
+);
+
+sp.w.lerp(
+measuredVelocity,
+1-Math.exp(-dt*16)
+);
+
+if(sp.w.length()>MAX_W)
+sp.w.setLength(MAX_W);
+
+}else{
+
+sp.S=null;
+
+const sinceInput=sp.lastInputTime
+?(performance.now()-sp.lastInputTime)/1000
+:999;
+
+let decayRate;
+
+if(sinceInput<.20)
+decayRate=sp.braking?14:.45;
+else if(sinceInput<.55)
+decayRate=sp.braking?14:.9;
+else
+decayRate=sp.braking?14:MOMENTUM_DECAY;
+
+const f=Math.exp(-dt*decayRate);
+
+sp.w.multiplyScalar(f);
+
+if(sinceInput>.7){
+
+sp.w.lerp(
+sp.idleW,
+1-Math.exp(-dt*1.5)
+);
+
+}
+
+if(sp.w.length()>MAX_W)
+sp.w.setLength(MAX_W);
+
+applySpin(
+sp.group,
+_r.copy(sp.w).multiplyScalar(dt)
+);
+
+}
+
+}
+
+
+const holoSpin=makeSpinner(
+hologram,
+2.2,
+new THREE.Vector3(.03,.10,0)
+);
+
+const cardSpin=makeSpinner(cardGroup,3.0);
+
+let holoSrc=null;
+
+
+// ============================================================
+// RETICLE / CARDS
+// ============================================================
+
+const reticle=$("reticle");
+
+function sizeReticle(){
+
+const d=Math.min(innerWidth,innerHeight)*RING_FRACTION*2;
+
+reticle.style.width=d+"px";
+reticle.style.height=d+"px";
+
+}
+
+sizeReticle();
+
+let activeIdx=-1;
+let openIdx=-1;
+
+const wp=new THREE.Vector3();
+
+function updateCards(t){
+
+const w=innerWidth;
+const h=innerHeight;
+
+const ringPx=Math.min(w,h)*RING_FRACTION;
+
+let best=-1;
+let bestD=1e9;
+
+cards.forEach((c,i)=>{
+
+const f=Math.sin(t*.5+c.phase)*.025;
+
+c.sprite.position.copy(c.base).multiplyScalar(1+f);
+
+c.sprite.getWorldPosition(wp);
+
+const front=wp.z/ORBIT_RADIUS;
+
+c.front=front;
+
+wp.project(camera);
+
+const d=Math.hypot(
+wp.x*w/2,
+wp.y*h/2
+);
+
+if(front>.25&&d<ringPx&&d<bestD){
+
+bestD=d;
+best=i;
+
+}
+
+});
+
+if(openIdx>=0)best=openIdx;
+
+if(best!==activeIdx){
+
+if(activeIdx>=0){
+
+cards[activeIdx].active=false;
+drawCard(cards[activeIdx]);
+
+}
+
+activeIdx=best;
+
+if(activeIdx>=0){
+
+cards[activeIdx].active=true;
+drawCard(cards[activeIdx]);
+selectionSound();
+
+}
+
+reticle.classList.toggle("lock",activeIdx>=0);
+
+}
+
+cards.forEach((c,i)=>{
+
+const depth=(c.front+1)/2;
+
+c.s+=(
+(c.active?1.35:.8+.3*depth)-c.s
+)*.14;
+
+c.sprite.scale.set(
+.95*c.s,
+.475*c.s,
+1
+);
+
+let o=c.active?1:.25+.6*depth;
+
+if(openIdx>=0&&i!==openIdx)o*=.25;
+
+c.mat.opacity+=(o-c.mat.opacity)*.15;
+
+});
+
+}
+
+
+// ============================================================
+// PANEL
+// ============================================================
+
+const panel=$("panel");
+const pImg=$("pImg");
+const pVid=$("pVid");
+const media=$("media");
+
+const isVid=s=>/\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(s);
+
+let itemIdx=0;
+let userActive=false;
+
+let slideshowTimer=null;
+let slideshowActive=false;
+
+function stopSlideshow(){
+
+if(slideshowTimer){
+clearTimeout(slideshowTimer);
+slideshowTimer=null;
+}
+
+slideshowActive=false;
+
+}
+
+function resetSlideshow(){
+
+stopSlideshow();
+
+if(
+openIdx<0||
+!MEMORIES[openIdx]||
+MEMORIES[openIdx].items.length<=1
+)return;
+
+slideshowTimer=setTimeout(
+startSlideshow,
+SLIDESHOW_DELAY
+);
+
+}
+
+function startSlideshow(){
+
+slideshowTimer=null;
+
+if(
+openIdx<0||
+!MEMORIES[openIdx]||
+MEMORIES[openIdx].items.length<=1
+)return;
+
+slideshowActive=true;
+
+step(1,true);
+
+}
+
+
+function fitMedia(){
+
+const v=panel.classList.contains("vid");
+const el=v?pVid:pImg;
+
+const nw=v?pVid.videoWidth:pImg.naturalWidth;
+const nh=v?pVid.videoHeight:pImg.naturalHeight;
+
+if(!nw||!nh)return;
+
+const maxW=Math.min(innerWidth*.86,780);
+const maxH=innerHeight*.66;
+
+const k=Math.min(maxW/nw,maxH/nh);
+
+el.style.width=Math.round(nw*k)+"px";
+el.style.height=Math.round(nh*k)+"px";
+
+}
+
+pImg.onload=()=>{
+panel.classList.remove("missing");
+fitMedia();
+};
+
+pVid.onloadedmetadata=()=>{
+panel.classList.remove("missing");
+fitMedia();
+};
+
+pImg.onerror=()=>{
+if(!panel.classList.contains("vid"))
+panel.classList.add("missing");
+};
+
+pVid.onerror=()=>{
+if(panel.classList.contains("vid"))
+panel.classList.add("missing");
+};
+
+
+function showItem(i,dir=0,automatic=false){
+
+const m=MEMORIES[openIdx];
+
+if(!m||!m.items.length){
+
+stopSlideshow();
+
+panel.classList.add("missing");
+panel.classList.remove("vid");
+
+pImg.removeAttribute("src");
+pVid.pause();
+pVid.removeAttribute("src");
+pVid.load();
+
+$("pFile").textContent=m?m.folder+"/":"EMPTY FOLDER";
+$("pTitle").textContent=m?m.title:"";
+$("pCap").textContent=m?m.caption:"";
+$("pCount").textContent="";
+$("pDots").textContent="";
+
+return;
+
+}
+
+const n=m.items.length;
+const nextIndex=(i%n+n)%n;
+const it=m.items[nextIndex];
+const vid=isVid(it.src);
+
+if(automatic||dir!==0){
+
+mediaChangeSound(dir);
+
+media.classList.remove("media-in");
+media.classList.add("media-out");
+
+}
+
+const delay=automatic||dir!==0?400:0;
+
+setTimeout(()=>{
+
+itemIdx=nextIndex;
+
+panel.classList.remove("missing");
+panel.classList.toggle("vid",vid);
+
+pImg.style.width="";
+pImg.style.height="";
+pVid.style.width="";
+pVid.style.height="";
+
+pVid.pause();
+
+media.classList.remove("media-out","media-in");
+
+if(vid){
+
+pImg.removeAttribute("src");
+
+pVid.src=it.src;
+pVid.muted=!userActive;
+pVid.currentTime=0;
+
+pVid.play().catch(()=>{
+
+pVid.muted=true;
+
+pVid.play().catch(()=>{});
+
+});
+
+}else{
+
+pVid.removeAttribute("src");
+pVid.load();
+pImg.src=it.src;
+
+}
+
+$("pFile").textContent=it.src;
+$("pTitle").textContent=m.title;
+$("pCap").textContent=it.caption||m.caption;
+
+$("pCount").textContent=
+n>1
+?String(itemIdx+1).padStart(2,"0")+
+" / "+
+String(n).padStart(2,"0")+
+(vid?"  ▶ VIDEO":"")
+:(vid?"▶ VIDEO":"");
+
+$("pDots").textContent=
+n>1
+?m.items.map((_,k)=>k===itemIdx?"●":"○").join("")
+:"";
+
+requestAnimationFrame(()=>{
+
+requestAnimationFrame(()=>{
+
+media.classList.add("media-in");
+
+});
+
+});
+
+setTimeout(()=>{
+
+media.classList.remove("media-in");
+
+},1000);
+
+},delay);
+
+if(openIdx>=0&&!automatic)
+resetSlideshow();
+
+}
+
+
+function step(d,automatic=false){
+
+if(
+openIdx>=0&&
+MEMORIES[openIdx].items.length>1
+){
+
+showItem(itemIdx+d,d,automatic);
+
+if(!automatic)
+swipeSound(d);
+
+resetSlideshow();
+
+}
+
+}
+
+
+function openPanel(i){
+
+stopSlideshow();
+
+openIdx=i;
+
+openSound();
+
+showItem(0,0,false);
+
+panel.classList.add("open");
+
+reticle.style.opacity=0;
+
+resetSlideshow();
+
+}
+
+
+function closePanel(){
+
+stopSlideshow();
+
+closeSound();
+
+openIdx=-1;
+
+panel.classList.remove("open");
+
+reticle.style.opacity=1;
+
+pVid.pause();
+pVid.removeAttribute("src");
+pVid.load();
+
+pImg.removeAttribute("src");
+
+media.classList.remove("media-out","media-in");
+
+}
+
+
+function tap(){
+
+if(openIdx>=0){
+
+closePanel();
+
+}else if(activeIdx>=0){
+
+pinchSound();
+openPanel(activeIdx);
+
+}
+
+}
+
+
+addEventListener("keydown",e=>{
+
+userActive=true;
+
+if(e.key==="Escape")
+closePanel();
+
+if(e.key==="ArrowRight")
+step(1);
+
+if(e.key==="ArrowLeft")
+step(-1);
+
+});
+
+
+// ============================================================
+// PARTICLES
+// ============================================================
+
+const PC=800;
+
+const pPos=new Float32Array(PC*3);
+const pVel=new Float32Array(PC*3);
+const pRad=new Float32Array(PC);
+const pPh=new Float32Array(PC);
+
+
+// ============================================================
+// TWINKLING STAR PARTICLES
+// ============================================================
+
+const pCol=new Float32Array(PC*3);
+
+const pTwinkle=new Float32Array(PC);
+
+const pTwinkleStrength=new Float32Array(PC);
+
+const pTwinkleSpeed=new Float32Array(PC);
+
+for(let i=0;i<PC;i++){
+
+pPos[i*3]=(Math.random()-.5)*11.5;
+pPos[i*3+1]=(Math.random()-.5)*7.8;
+pPos[i*3+2]=(Math.random()-.5)*5.8;
+
+for(let k=0;k<3;k++)
+pVel[i*3+k]=(Math.random()-.5)*.1;
+
+pRad[i]=.75+Math.random()*.65;
+pPh[i]=Math.random()*6.28;
+
+
+/*
+ * Only a few particles are selected.
+ * They will occasionally flash yellow.
+ */
+if(Math.random()<.035){
+
+pTwinkle[i]=Math.random()*Math.PI*2;
+
+pTwinkleStrength[i]=
+.75+
+Math.random()*.35;
+
+pTwinkleSpeed[i]=
+.55+
+Math.random()*1.8;
+
+}else{
+
+pTwinkle[i]=-100;
+pTwinkleStrength[i]=0;
+pTwinkleSpeed[i]=0;
+
+}
+
+
+/*
+ * CYANISH BLUE BASE COLOR.
+ *
+ * More cyan than the previous royal-blue look.
+ */
+pCol[i*3]=.015;
+pCol[i*3+1]=.62;
+pCol[i*3+2]=1.0;
+
+}
+
+
+const pGeo=new THREE.BufferGeometry();
+
+pGeo.setAttribute(
+"position",
+new THREE.BufferAttribute(pPos,3)
+);
+
+pGeo.setAttribute(
+"color",
+new THREE.BufferAttribute(pCol,3)
+);
+
+
+/*
+ * WHITE material + per-particle colors.
+ * This preserves the exact cyan particle color.
+ */
+const particleMaterial=new THREE.PointsMaterial({
+
+color:0xffffff,
+
+size:.026,
+
+transparent:true,
+
+opacity:.72,
+
+depthWrite:false,
+
+vertexColors:true,
+
+blending:THREE.AdditiveBlending
+
+});
+
+
+const particlePoints=new THREE.Points(
+pGeo,
+particleMaterial
+);
+
+hologram.add(particlePoints);
+
+
+// ============================================================
+// YELLOW TWINKLE
+// ============================================================
+
+function updateTwinkles(ms){
+
+const time=ms*.001;
+
+for(let i=0;i<PC;i++){
+
+const phase=pTwinkle[i];
+
+if(phase<0){
+
+/*
+ * Normal particles always stay cyan.
+ */
+pCol[i*3]=.015;
+pCol[i*3+1]=.62;
+pCol[i*3+2]=1.0;
+
+continue;
+
+}
+
+
+/*
+ * Independent timing for every selected particle.
+ */
+const wave=
+(
+Math.sin(
+time*pTwinkleSpeed[i]+phase
+)+1
+)*.5;
+
+
+/*
+ * Very sharp peak.
+ *
+ * Most of the time:
+ * cyan.
+ *
+ * Very briefly:
+ * yellow glowing star.
+ */
+const flash=
+Math.pow(wave,10)*
+pTwinkleStrength[i];
+
+
+/*
+ * Start cyan.
+ */
+const cyanR=.015;
+const cyanG=.62;
+const cyanB=1.0;
+
+
+/*
+ * Yellow target.
+ */
+const yellowR=1.0;
+const yellowG=.82;
+const yellowB=.08;
+
+
+/*
+ * Stronger color change only at the peak.
+ */
+const mix=
+THREE.MathUtils.clamp(
+flash*1.15,
+0,
+1
+);
+
+
+/*
+ * Same particle smoothly changes:
+ *
+ * CYAN → YELLOW → CYAN
+ */
+let r=
+THREE.MathUtils.lerp(
+cyanR,
+yellowR,
+mix
+);
+
+let g=
+THREE.MathUtils.lerp(
+cyanG,
+yellowG,
+mix
+);
+
+let b=
+THREE.MathUtils.lerp(
+cyanB,
+yellowB,
+mix
+);
+
+
+/*
+ * Add brightness to the yellow flash.
+ * All channels are boosted together so it
+ * actually blooms like a tiny star.
+ */
+const glow=
+1+
+flash*3.5;
+
+r*=glow;
+g*=glow;
+b*=glow;
+
+pCol[i*3]=r;
+pCol[i*3+1]=g;
+pCol[i*3+2]=b;
+
+}
+
+pGeo.attributes.color.needsUpdate=true;
+
+}
+
+
+// ============================================================
+// PARTICLE EXPLOSION
+// ============================================================
+
+function explode(amount){
+
+const strength=THREE.MathUtils.clamp(
+amount/9,
+0,
+1
+);
+
+explosionSound(strength);
+
+for(let i=0;i<PC;i++){
+
+const x=pPos[i*3];
+const y=pPos[i*3+1];
+const z=pPos[i*3+2];
+
+const d=Math.max(.001,Math.hypot(x,y,z));
+
+const f=amount*(2+Math.random()*2.5);
+
+pVel[i*3]+=x/d*f;
+pVel[i*3+1]+=y/d*f;
+pVel[i*3+2]+=z/d*f;
+
+}
+
+}
+
+
+// ============================================================
+// PARTICLE UPDATE
+// ============================================================
+
+function updateParticles(dt,ms){
+
+const ns=THREE.MathUtils.clamp(
+smoothScale,
+.28,
+3
+);
+
+const field=THREE.MathUtils.lerp(
+.75,
+8.5,
+(ns-.28)/(3-.28)
+);
+
+const damp=Math.pow(.994,dt*60);
+
+let motionEnergy=0;
+const sampleStep=20;
+let sampleCount=0;
+
+for(let i=0;i<PC;i++){
+
+const j=i*3;
+
+const x=pPos[j];
+const y=pPos[j+1];
+const z=pPos[j+2];
+
+const d=Math.max(
+.001,
+Math.hypot(x,y,z)
+);
+
+const diff=d-field*pRad[i];
+
+const nx=x/d;
+const ny=y/d;
+const nz=z/d;
+
+if(diff>0){
+
+const p=
+(.38+Math.min(diff*.28,1.8))*dt;
+
+pVel[j]-=nx*p;
+pVel[j+1]-=ny*p;
+pVel[j+2]-=nz*p;
+
+}else if(diff<-.15){
+
+const p=Math.min(-diff,2)*.085*dt;
+
+pVel[j]+=nx*p;
+pVel[j+1]+=ny*p;
+pVel[j+2]+=nz*p;
+
+}
+
+const dr=.018*dt;
+const ph=pPh[i];
+
+pVel[j]+=
+Math.sin(ms*.00035+ph)*dr;
+
+pVel[j+1]+=
+Math.cos(ms*.00031+ph)*dr;
+
+pVel[j+2]+=
+Math.sin(ms*.00027+ph*1.7)*dr;
+
+pVel[j]*=damp;
+pVel[j+1]*=damp;
+pVel[j+2]*=damp;
+
+const sp=Math.hypot(
+pVel[j],
+pVel[j+1],
+pVel[j+2]
+);
+
+if(sp>4.5){
+
+const f=4.5/sp;
+
+pVel[j]*=f;
+pVel[j+1]*=f;
+pVel[j+2]*=f;
+
+}
+
+if(i%sampleStep===0){
+
+motionEnergy+=sp;
+sampleCount++;
+
+}
+
+pPos[j]+=pVel[j]*dt;
+pPos[j+1]+=pVel[j+1]*dt;
+pPos[j+2]+=pVel[j+2]*dt;
+
+}
+
+pGeo.attributes.position.needsUpdate=true;
+
+
+/*
+ * Update cyan → yellow → cyan twinkles.
+ */
+updateTwinkles(ms);
+
+
+if(sampleCount){
+
+const avgMotion=motionEnergy/sampleCount;
+
+const intensity=THREE.MathUtils.clamp(
+avgMotion*.35,
+0,
+1
+);
+
+particleEnergySound(intensity);
+
+}
+
+}
+
+
+// ============================================================
+// HAND TRACKING
+// ============================================================
+
+let hasLeft=false;
+let hasRight=false;
+let hasHand=false;
+
+let handScale=1;
+let smoothScale=1;
+let prevHandScale=1;
+
+let pinching=false;
+let rPinch=false;
+let rWasPinch=false;
+
+let lastTap=0;
+let lastSwipe=0;
+
+let keepL=null;
+let keepR=null;
+
+const swipeHist=[];
+
+const video=$("webcam");
+const handCv=$("handCanvas");
+const hctx=handCv.getContext("2d");
+
+let camVisible=true;
+
+$("cameraToggle").addEventListener("click",e=>{
+
+e.stopPropagation();
+
+initAudio();
+
+camVisible=!camVisible;
+
+video.style.display=camVisible?"block":"none";
+
+$("cameraToggle").textContent=
+camVisible
+?"HIDE CAMERA"
+:"SHOW CAMERA";
+
+});
+
+
+const hands=new Hands({
+locateFile:f=>
+`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+
+maxNumHands:2,
+modelComplexity:0,
+minDetectionConfidence:.35,
+minTrackingConfidence:.35
+
+});
+
+const swap=l=>
+!SWAP_MEDIAPIPE_HAND_LABELS
+?l
+:l==="Left"
+?"Right"
+:l==="Right"
+?"Left"
+:l;
+
+
+// ============================================================
+// MEDIAPIPE RESULTS
+// ============================================================
+
+hands.onResults(res=>{
+
+if(
+res.image&&
+(
+handCv.width!==res.image.width||
+handCv.height!==res.image.height
+)
+){
+
+handCv.width=res.image.width;
+handCv.height=res.image.height;
+
+}
+
+hctx.clearRect(
+0,
+0,
+handCv.width,
+handCv.height
+);
+
+let L=null;
+let R=null;
+
+const hl=res.multiHandLandmarks||[];
+const handed=res.multiHandedness||[];
+
+hl.forEach((lm,i)=>{
+
+drawConnectors(
+hctx,
+lm,
+HAND_CONNECTIONS,
+{
+color:"#00eaff",
+lineWidth:2
+}
+);
+
+drawLandmarks(
+hctx,
+lm,
+{
+color:"#ffffff",
+lineWidth:1,
+radius:3
+}
+);
+
+const lab=
+handed[i]
+?handed[i].label
+:null;
+
+const physical=swap(lab);
+
+if(physical==="Left"&&!L)
+L=lm;
+else if(physical==="Right"&&!R)
+R=lm;
+
+});
+
+
+if(hl.length>=2&&(!L||!R)){
+
+const ordered=[...hl].sort(
+(a,b)=>a[0].x-b[0].x
+);
+
+if(!L)
+L=ordered[ordered.length-1];
+
+if(!R)
+R=ordered[0];
+
+if(L===R){
+
+L=ordered[1];
+R=ordered[0];
+
+}
+
+}
+
+
+const tnow=performance.now();
+
+if(L){
+
+keepL={
+lm:L,
+t:tnow
+};
+
+}else if(
+keepL&&
+tnow-keepL.t<120
+){
+
+L=keepL.lm;
+
+}
+
+
+if(R){
+
+keepR={
+lm:R,
+t:tnow
+};
+
+}else if(
+keepR&&
+tnow-keepR.t<120
+){
+
+R=keepR.lm;
+
+}
+
+
+hasLeft=!!L;
+hasRight=!!R;
+hasHand=hasLeft||hasRight;
+
+const main=L||R;
+
+if(main){
+
+const idx=main[8];
+const th=main[4];
+
+const d=Math.hypot(
+th.x-idx.x,
+th.y-idx.y
+);
+
+handScale=THREE.MathUtils.clamp(
+d*5,
+.28,
+3
+);
+
+pinching=
+pinching
+?d<.10
+:d<.08;
+
+hctx.beginPath();
+
+hctx.moveTo(
+th.x*handCv.width,
+th.y*handCv.height
+);
+
+hctx.lineTo(
+idx.x*handCv.width,
+idx.y*handCv.height
+);
+
+hctx.strokeStyle=
+pinching
+?"#ffffff"
+:"#ff33cc";
+
+hctx.lineWidth=4;
+hctx.stroke();
+
+const src=L?"L":"R";
+
+if(holoSrc!==src){
+
+holoSpin.F=null;
+holoSpin.S=null;
+holoSrc=src;
+
+}
+
+feed(holoSpin,main);
+
+}else{
+
+pinching=false;
+holoSrc=null;
+feed(holoSpin,null);
+
+}
+
+
+if(R){
+
+const ref=
+Math.hypot(
+R[0].x-R[9].x,
+R[0].y-R[9].y
+)||.1;
+
+const ratio=
+Math.hypot(
+R[4].x-R[8].x,
+R[4].y-R[8].y
+)/ref;
+
+rPinch=
+rPinch
+?ratio<.42
+:ratio<.28;
+
+const now=performance.now();
+
+feed(cardSpin,R);
+
+cardSpin.active=
+openIdx<0&&!rPinch;
+
+cardSpin.braking=rPinch;
+
+
+if(
+rPinch&&
+!rWasPinch&&
+now-lastTap>600
+){
+
+if(openIdx>=0){
+
+closePanel();
+lastTap=now;
+
+}else if(activeIdx>=0){
+
+tap();
+lastTap=now;
+
+}
+
+}
+
+rWasPinch=rPinch;
+
+
+if(openIdx>=0&&!rPinch){
+
+swipeHist.push({
+t:now,
+x:R[9].x,
+y:R[9].y
+});
+
+while(
+swipeHist.length&&
+now-swipeHist[0].t>280
+)
+swipeHist.shift();
+
+if(swipeHist.length){
+
+const a=swipeHist[0];
+
+const dx=R[9].x-a.x;
+const dy=R[9].y-a.y;
+
+if(
+now-lastSwipe>700&&
+Math.abs(dx)>.15&&
+Math.abs(dx)>Math.abs(dy)*1.4
+){
+
+step(dx<0?1:-1);
+
+lastSwipe=now;
+swipeHist.length=0;
+
+}
+
+}
+
+}else{
+
+swipeHist.length=0;
+
+}
+
+}else{
+
+feed(cardSpin,null);
+
+cardSpin.braking=false;
+
+rPinch=false;
+rWasPinch=false;
+
+swipeHist.length=0;
+
+}
+
+});
+
+
+// ============================================================
+// CAMERA
+// ============================================================
+
+video.addEventListener("loadedmetadata",()=>{
+
+video.style.aspectRatio=
+handCv.style.aspectRatio=
+video.videoWidth+
+"/"+
+video.videoHeight;
+
+try{
+
+const tr=video.srcObject.getVideoTracks()[0];
+
+const caps=
+tr.getCapabilities&&
+tr.getCapabilities();
+
+if(caps&&caps.zoom){
+
+tr.applyConstraints({
+advanced:[
+{
+zoom:caps.zoom.min
+}
+]
+});
+
+}
+
+}catch(e){}
+
+});
+
+
+const feedCv=document.createElement("canvas");
+const feedCtx=feedCv.getContext("2d");
+
+let processingHands=false;
+
+new Camera(
+video,
+{
+
+onFrame:async()=>{
+
+if(!video.videoWidth||processingHands)
+return;
+
+processingHands=true;
+
+const fw=640;
+
+const fh=
+Math.round(
+640*
+video.videoHeight/
+video.videoWidth
+);
+
+if(
+feedCv.width!==fw||
+feedCv.height!==fh
+){
+
+feedCv.width=fw;
+feedCv.height=fh;
+
+}
+
+feedCtx.drawImage(
+video,
+0,
+0,
+fw,
+fh
+);
+
+try{
+
+await hands.send({
+image:feedCv
+});
+
+}catch(e){
+
+console.warn(
+"Hand tracking:",
+e
+);
+
+}
+
+processingHands=false;
+
+},
+
+width:CAM_W,
+height:CAM_H
+
+}
+).start();
+
+
+// ============================================================
+// ANIMATION
+// ============================================================
+
+let last=performance.now();
+
+const tmpScale=new THREE.Vector3();
+
+function animate(){
+
+requestAnimationFrame(animate);
+
+const now=performance.now();
+
+const dt=Math.min(
+(now-last)/1000,
+.033
+);
+
+last=now;
+
+smoothScale+=
+(
+handScale-
+smoothScale
+)*
+(
+1-Math.exp(-dt*10)
+);
+
+updateSpinner(
+holoSpin,
+dt
+);
+
+if(hasHand){
+
+const ch=handScale-prevHandScale;
+
+if(ch>.32&&handScale>1){
+
+explode(
+Math.min(9,ch*11)
+);
+
+}
+
+}
+
+prevHandScale=handScale;
+
+const cs=
+pinching
+?Math.max(.225,smoothScale*.52)
+:smoothScale;
+
+core.scale.lerp(
+tmpScale.set(cs,cs,cs),
+.12
+);
+
+coreMesh.rotation.x+=.002;
+coreMesh.rotation.y+=.004;
+
+innerCore.rotation.x-=.003;
+innerCore.rotation.y+=.006;
+
+mainArc1.rotation.z+=.003;
+mainArc2.rotation.z+=.003;
+
+sideArc1.rotation.z-=.004;
+sideArc2.rotation.z-=.004;
+
+vArc1.rotation.y+=.003;
+vArc2.rotation.y+=.003;
+
+thinArc.rotation.x-=.002;
+
+updateSpinner(
+cardSpin,
+dt
+);
+
+updateParticles(
+dt,
+now
+);
+
+updateCards(
+now*.001
+);
+
+updateClock();
+
+composer.render();
+
+}
+
+animate();
+
+
+// ============================================================
+// RESIZE
+// ============================================================
+
+addEventListener("resize",()=>{
+
+camera.aspect=
+innerWidth/innerHeight;
+
+camera.updateProjectionMatrix();
+
+renderer.setSize(
+innerWidth,
+innerHeight
+);
+
+composer.setSize(
+innerWidth,
+innerHeight
+);
+
+sizeReticle();
+
+fitMedia();
+
+});
+
+</script>
+
+</body>
+</html>
